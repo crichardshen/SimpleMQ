@@ -1,0 +1,29 @@
+// 生产者客户端示例
+public class SocketProducer {
+    public static void main(String[] args) {
+        try (
+            Socket socket = new Socket("localhost", 9090);
+            DataOutputStream out = new DataOutputStream(socket.getOutputStream());
+            DataInputStream in = new DataInputStream(socket.getInputStream())
+        ) {
+            // 发送二进制消息
+            byte[] data = "Hello World".getBytes();
+            
+            // 发送消息类型 (1 = 二进制消息)
+            out.writeByte(1);
+            // 发送主题
+            out.writeUTF("test-topic");
+            // 发送数据长度
+            out.writeInt(data.length);
+            // 发送数据
+            out.write(data);
+            
+            // 读取确认
+            boolean success = in.readBoolean();
+            System.out.println("Message sent: " + success);
+            
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+}

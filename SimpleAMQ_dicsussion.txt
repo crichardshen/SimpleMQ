@@ -1,0 +1,183 @@
+1- 高可用
+2- 高并发
+3- 低延迟，高吞吐
+
+
+在这个消息队列系统中：
+生产者(Producer) -> MessageController -> SimpleMQBroker
+生产者通过 HTTP POST 请求调用 /api/message/publish 接口
+生产者将消息发送给我们的消息队列系统
+MessageController 接收到消息后，将其转交给 SimpleMQBroker 处理
+SimpleMQBroker -> Consumer
+SimpleMQBroker 将消息存储并分发给已订阅该主题的消费者
+消费者通过 WebSocket 连接接收消息
+所以 MessageController 的 publish 接口是作为生产者的入口，它是接收生产者发来的消息，而不是发送消息给消费者。
+
+=========
+
+MessageController
+是我们程序的 HTTP 接口层
+接收外部生产者(Producer)发来的 HTTP 请求
+本质上是一个接收消息的入口
+SimpleMQBroker
+是我们程序的核心处理组件
+负责消息的存储、分发等核心业务逻辑
+本质上是一个消息处理中心
+
+=========
+
+但是您说得对，从架构设计的角度来看，我们确实需要一个消息队列来存储消息。在 SimpleMQBroker 中应该有类似这样的队列对象：
+SimpleMQBroker 中应该有：
+1. 消息队列容器
+   - 可以用 ConcurrentLinkedQueue (线程安全的队列)
+   - 或者 BlockingQueue 的实现类如 LinkedBlockingQueue
+   - 按主题分类存储，即 Map<String, Queue<Message>>
+
+2. 当前的实现：
+   - 只有 Map<String, List<Consumer>> topicConsumers 存储了订阅关系
+   - 但缺少实际存储消息的队列
+
+比如可以这样设计：
+生产者 -> MessageController 
+-> SimpleMQBroker.publish() 
+-> 存入 Map<String, Queue<Message>> messageQueues
+-> 分发给消费者
+
+===========
+
+是的，完全正确。当前代码中我们看到：
+SimpleMQBroker 中调用了 dispatcher.dispatch()，但这只是接口调用
+DispatcherType 枚举定义了三种分发策略：
+ROUND_ROBIN (轮询)
+ORDERED (顺序)
+RANDOM (随机)
+但是缺少了具体的 Dispatcher 实现类，比如 OrderedDispatcher
+我们需要实现的是消息最终如何发送给消费者。这部分实现可能包括：
+具体的分发策略实现
+与消费者的实际通信（可能通过 WebSocket 或其他方式）
+消息投递的确认机制
+这是消息队列中非常关键的一环，因为它涉及：
+消息投递的可靠性
+消息顺序的保证
+负载均衡
+失败重试机制
+
+=============
+1. 核心组件
+SimpleMQBroker (broker/SimpleMQBroker.java)
+消息队列的核心处理组件
+管理消息的存储、分发和处理
+维护主题订阅关系
+管理三个线程池（分发、处理、持久化）
+
+2. 配置相关
+配置枚举类
+StorageType：存储类型（内存/文件/数据库）
+ReplicationType：复制类型（单副本/同步/异步）
+DispatcherType：分发策略（轮询/顺序/随机）
+DeliveryType：投递保证（最多一次/至少一次/精确一次）
+
+配置管理
+SimpleMQProperties：读取配置文件
+SimpleMQAutoConfiguration：根据配置创建相应组件
+WebSocketConfig：WebSocket 配置
+
+3. 通信层
+**************
+1. 生产者通信入口
+REST API (controller/MessageController.java)
+   处理 HTTP 请求
+      支持 JSON 格式消息：POST /api/message/publish (Content-Type: application/json)
+      支持二进制消息：POST /api/message/publish (Content-Type: application/octet-stream)
+      处理生产者注册：POST /api/message/register/producer
+
+WebSocket (websocket/)
+   WebSocketConfig：配置 WebSocket 端点 "/ws/message"
+   MessageWebSocketHandler：处理 WebSocket 连接和消息
+   支持 JSON 消息（TextMessage）
+   支持二进制消息（BinaryMessage）
+
+Socket (socket/)
+   MessageSocketServer：Socket 服务器（端口9090）
+   SocketClientHandler：处理 Socket 客户端连接和消息
+   支持二进制消息（messageType = 1）
+
+2. 消费者通信入口
+REST API 订阅
+   POST /api/message/subscribe/{topic}：订阅主题
+   返回 WebSocket 连接信息（URL和token）
+
+WebSocket 接收
+   消费者通过 WebSocket 连接接收消息
+   使用 token 验证身份和主题
+
+3. 消息流转过程
+REST API 方式：
+生产者 -> HTTP请求 -> MessageController -> broker.publish()
+
+WebSocket 方式：
+生产者 -> WebSocket连接 -> MessageWebSocketHandler -> broker.publish()
+
+Socket 方式：
+生产者 -> Socket连接 -> SocketClientHandler -> broker.publish()
+
+消费者接收
+broker -> WebSocket -> 消费者
+
+
+4. 安全机制
+   REST API：通过 HTTP 头部验证
+   WebSocket：通过 token 验证
+   Socket：当前是基本实现，可以添加认证机制
+
+这样的架构提供了多种通信方式的选择，生产者可以根据需要选择最适合的方式：
+   REST API：适合简单的消息发送
+   WebSocket：适合需要保持连接的场景
+   Socket：适合需要高性能的场景
+而消费者统一使用 WebSocket 接收消息，保证了消息推送的实时性和效率。
+
+**************
+
+4. 分发机制
+分发接口和实现
+Dispatcher：分发器接口
+OrderedDispatcher：顺序分发实现
+管理消费者队列和会话
+
+5. 模型类
+数据模型
+ConsumerInfo：消费者信息
+SubscriptionResponse：订阅响应
+Message：消息模型（待实现）
+
+6. 服务层
+MessageService
+封装消息发布和订阅的业务逻辑
+提供给控制层调用的接口
+
+7. 应用入口
+SimpleMQApplication
+Spring Boot 应用入口
+启动整个服务
+
+
+待开发的部分：
+1- 存储实现
+实现不同的存储策略（内存/文件/数据库）
+完善 Storage 接口及其实现
+
+2- 消息模型
+定义 Message 类
+添加消息属性和序列化
+
+3- 消费者实现
+完善 Consumer 类
+实现消费者客户端
+
+4- 分发策略
+实现 RoundRobin 和 Random 分发器
+完善分发机制
+
+5- 消息确认机制
+实现消息确认
+处理消息重试

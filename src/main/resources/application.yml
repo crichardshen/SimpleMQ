@@ -1,0 +1,35 @@
+simplemq:
+  dispatcher:
+    type: ORDERED  # 可选值: ORDERED, ROUND_ROBIN, RANDOM
+    consumer-select:
+      strategy: PRIORITY
+    consumers:
+      priority-hosts:
+        - abc_1a  # 最高优先级
+        - abc_2a  # 次高优先级
+        - abc_3a  # 最低优先级
+  storage:
+    type: MEMORY   # 可选值: MEMORY, FILE, DATABASE
+  delivery:
+    type: AT_LEAST_ONCE  # 可选值: AT_MOST_ONCE, AT_LEAST_ONCE, EXACTLY_ONCE
+  websocket:
+    url: ws://localhost:8080/ws/message
+  message:
+    max-length: 1000  # 消息最大长度限制 
+  heartbeat:
+    interval: 5000
+    timeout: 15000
+    port: 9091
+    peer-address: localhost  # 在实际部署时修改为对端地址
+    server-id: 1a           # 在不同服务器上设置不同的ID
+    initial-role: MASTER     # 初始角色
+
+spring:
+  jvm:
+    opts: -Xms2g -Xmx4g -XX:+UseG1GC 
+
+---
+simplemq:
+  heartbeat:
+    server-id: 2a    # 2a的配置
+    initial-role: SLAVE 

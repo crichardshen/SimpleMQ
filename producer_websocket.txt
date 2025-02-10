@@ -1,0 +1,11 @@
+WebSocketClient client = new WebSocketClient(new URI("ws://localhost:8080/ws/message?token=xxx")) {
+    @Override
+    public void onOpen(ServerHandshake handshake) {
+        // 设置主题
+        send("{\"type\":\"SET_TOPIC\",\"topic\":\"test-topic\"}");
+        
+        // 发送二进制数据
+        byte[] data = "Hello World".getBytes();
+        send(data);
+    }
+};

@@ -1,0 +1,65 @@
+龙虎山寨炸开的山洞
+竹林房子里，小猫那边的解密宝箱
+
+1- 问题
+failover 的部分怎么完成，也就是 1A 死了之后，2A 的socket 是怎么和 ATMH 的 1A 链接的上
+
+2- 特性描述
+好的，我来分析一下在这个架构中使用的 ActiveMQ (AMQ) 主要特性：
+==============================
+- 故障转移 (Failover Transport)
+	通过 failover 协议支持自动重连和故障转移
+	当主 broker 不可用时，自动切换到备用 broker
+	主要参数：
+	randomize：控制连接顺序
+	priorityBackup：支持主备优先级设置
+	maxReconnectAttempts：重连尝试次数
+	startupMaxReconnectAttempts：启动时的最大重连次数
+
+- 支持多种主备模式：
+	共享存储主备模式
+	复制型主备模式
+	ZooKeeper 主备模式
+
+- 支持多种持久化方式：
+	KahaDB（默认）
+	AMQ
+	JDBC
+	LevelDB
+
+- 消息投递保证，支持多种消息确认机制：
+	AUTO_ACKNOWLEDGE
+	CLIENT_ACKNOWLEDGE
+	DUPS_OK_ACKNOWLEDGE
+	SESSION_TRANSACTED
+
+- 消息分发策略，支持多种分发策略：
+	Round Robin（轮询）
+	Strict Order（严格顺序）
+	自定义分发策略
+
+- 网络连接器 (Network Connector)，用于 broker 之间的消息同步支持：
+	静态网络
+	动态网络
+	双向同步
+==========================================
+
+ActiveMQ的线程模型
+- 消息分发线程
+使用单线程处理消息的分发
+这个设计保证了消息的顺序性
+主要通过 org.apache.activemq.broker.region.Queue 来实现
+
+- 网络连接处理
+使用线程池处理客户端连接
+通过 org.apache.activemq.transport 包实现
+每个连接都有独立的线程处理
+
+- 持久化处理
+使用独立线程处理消息持久化
+避免 I/O 操作阻塞消息处理
+
+- 消费者处理
+可以配置为单线程或多线程模式
+通过 prefetch 参数控制预取数量
+支持独立线程池处理消费者请求

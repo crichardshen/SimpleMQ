@@ -1,0 +1,33 @@
+// 使用 HttpClient 发送
+byte[] data = "Hello World".getBytes();  // 或其他二进制数据
+
+HttpClient client = HttpClient.newHttpClient();
+HttpRequest request = HttpRequest.newBuilder()
+    .uri(URI.create("http://localhost:8080/api/message/publish"))
+    .header("Content-Type", "application/octet-stream")
+    .header("X-Topic", "test-topic")
+    .POST(HttpRequest.BodyPublishers.ofByteArray(data))
+    .build();
+
+HttpResponse<String> response = client.send(request, 
+    HttpResponse.BodyHandlers.ofString());
+
+
+=======================================================
+
+RestTemplate restTemplate = new RestTemplate();
+
+byte[] data = Files.readAllBytes(Paths.get("file.bin"));
+
+HttpHeaders headers = new HttpHeaders();
+headers.setContentType(MediaType.APPLICATION_OCTET_STREAM);
+headers.set("X-Topic", "test-topic");
+
+HttpEntity<byte[]> requestEntity = new HttpEntity<>(data, headers);
+
+ResponseEntity<String> response = restTemplate.exchange(
+    "http://localhost:8080/api/message/publish",
+    HttpMethod.POST,
+    requestEntity,
+    String.class
+);

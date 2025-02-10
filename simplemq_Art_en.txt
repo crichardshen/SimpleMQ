@@ -1,0 +1,367 @@
+SimpleMQ Architecture Design Document
+==================
+
+1. System Overview
+-----------------
+SimpleMQ is a lightweight message queue system with a master-slave architecture design, featuring high availability and reliability. The system supports multiple message dispatch strategies, provides real-time message processing capabilities, and includes comprehensive message storage and monitoring mechanisms.
+
+2. Core Features
+-----------------
+- Master-slave high availability architecture
+- Intelligent message dispatching
+- Real-time message processing
+- Local storage
+- Comprehensive monitoring
+
+3. System Architecture
+-----------------
+3.1 Overall Architecture
+SimpleMQ adopts a master-slave architecture consisting of two identical nodes:
+- Master Node (e.g., 1a)
+  * Responsibility: Handle all message reception and distribution
+  * Principle: Control message processing permissions through active flag
+  * Advantage: Single-point processing avoids data consistency issues
+  * Risk: Performance bottleneck, requires proper message volume control
+
+- Slave Node (e.g., 2a)
+  * Responsibility: Act as hot backup, monitor master node status
+  * Principle: Receive heartbeats in real-time, maintain ready state
+  * Advantage: Zero data loss during failover
+  * Risk: Heartbeat delays may cause false judgments
+
+- Automatic Failover Mechanism
+  * Working Principle:
+    - Similar to human body's "double insurance" mechanism
+    - Master node sends "I'm alive" signal (heartbeat) to slave every 5 seconds
+    - Slave node records the last time master node "reported safe"
+    - If no signal is received from master node for 15 seconds (3 times), slave node assumes master node has failed
+   
+  * Failure Handling Process:
+    1. Discovery Phase: Slave node discovers potential master node failure
+    2. Confirmation Phase:
+       - First Check: Heartbeat Counter
+         * Must miss 3 consecutive heartbeats (15 seconds) to trigger confirmation
+         * Avoids temporary heartbeat loss due to network jitter
+       
+       - Second Check: Master Node Status Verification
+         * Check last status information sent by master node:
+           - Heartbeat package contains current node status (RUNNING/STARTING/STOPPING/STOPPED)
+           - Contains node current role (MASTER/SLAVE)
+           - Contains key performance metrics (CPU usage, memory usage, etc.)
+         
+         * Status Judgment Logic:
+           - If status is STOPPING or STOPPED: Normal shutdown, no switch needed
+           - If status is STARTING: Node is starting up, wait for completion
+           - If status is RUNNING but metrics abnormal: Node might be overloaded, switch needed
+           - If last status is RUNNING and metrics normal:
+             * Need to consider last heartbeat time
+             * If last heartbeat within 15 seconds: Might be temporary network issue, continue monitoring
+             * If last heartbeat over 15 seconds:
+               - Node might have crashed suddenly
+               - Or node completely disconnected from network
+               - Only consider switching in this case
+       
+       - Third Check: Network Connectivity Test
+         * Try connecting to master node through backup channel (e.g., TCP port)
+         * Confirm if master node is truly unreachable
+       
+       - Fourth Check: Runtime Comparison
+         * Check runtime of master and slave nodes
+         * Avoid newly restarted node mistakenly becoming master
+    3. Takeover Phase: Slave node upgrades to new master node
+    4. Recovery Phase: Original master node automatically downgrades to slave when recovered
+   
+  * Advantages:
+    - No manual intervention needed, system automatically completes failover
+    - Short failure recovery time, usually completed within seconds
+    - Service uninterrupted, users unaware
+   
+  * Risks and Solutions:
+    - Risk 1: Network jitter may cause false judgments
+      Solution: Use multiple confirmation mechanisms to avoid misjudgments due to temporary network issues
+    
+    - Risk 2: Both nodes think they are master (split-brain)
+      Solution: Use node priority and runtime judgment to ensure only one master at a time
+    
+    - Risk 3: Frequent switching affects system stability
+      Solution: Add switching cooldown time to prevent frequent switches in short periods
+
+3.2 Core Components
+a) Message Processing Layer
+- SimpleMQBroker
+  * Core Function: Message broker, responsible for message reception and distribution
+  * Implementation Principle:
+    - Adopts singleton pattern design
+      * Ensures only one Broker instance per node
+    * Managed by Spring container
+    * Work Responsibilities:
+      - Overall Process Coordination
+        * Receive producer messages
+        * Manage subscription relationships
+        * Schedule processing workflows
+      - System Management
+        * Monitor component status
+        * Resource allocation
+        * System configuration
+    * Advantages:
+      - Flexible message processing mechanism
+      - Good performance and scalability
+      - Unified resource management
+      - State maintenance consistency
+  * Risks:
+    - Need proper thread pool parameter configuration
+    - Message accumulation may affect performance
+    - Singleton may become performance bottleneck
+    - Need attention to concurrent control
+
+- MessageProcessor
+  * Core Function: Message processor, ensures reliable message processing
+  * Implementation Principle:
+    - Pre-processing
+      * Message format validation
+      * Message decoding
+      * Format conversion
+    - Core Processing
+      * Business logic processing
+      * Message content processing
+      * Message transformation/enrichment
+    - Asynchronous Processing Mechanism
+      * Use thread pool for message processing
+      * Support parallel processing
+      * Processing timeout control
+  * Advantages:
+    - Improve system throughput
+    - Focus on message content processing
+    - Flexible message processing mechanism
+    - Extensible processing workflow
+  * Risks:
+    - Asynchronous processing may affect message order
+    - Processing logic complexity increases
+    - Need to consider processing performance
+
+- Dispatcher
+  * Core Function: Message dispatcher, supports multiple dispatch strategies
+  * Implementation Principle:
+    - Strategy pattern implements different dispatch algorithms
+    - Consumer registration and deregistration mechanism
+    - Dispatch Management
+      * Message dispatch strategy execution
+      * Consumer selection and management
+      * Message queue mapping maintenance
+    - Status Management
+      * Message Delivery Status Confirmation Mechanism
+        - ACK: Consumer sends confirmation after successful processing
+        - NACK: Consumer sends rejection when processing fails
+        - Timeout: No confirmation received within specified time
+      * Message Status Tracking
+        - DELIVERING: Message is being delivered
+        - DELIVERED: Message successfully delivered and confirmed
+        - FAILED: Delivery failed or rejected
+        - TIMEOUT: Delivery timeout
+      * Retry Mechanism
+        - Automatic retry on failure
+        - Configurable retry count and interval
+        - Enter dead letter queue after exceeding retry limit
+    - Post Processing
+      * Consumer callback notification
+      * Failure retry processing
+      * Dead letter handling
+  * Advantages:
+    - Complete message delivery guarantee
+    - Flexible dispatch strategy support
+    - Reliable status management
+    - Comprehensive exception handling
+  * Risks:
+    - Strategy switching may affect messages being processed
+    - Status synchronization complexity
+    - Need to handle various exception scenarios
+    - Retry strategy rationality
+
+b) Storage Layer
+- JsonFileMessageStorage
+  * Core Function: JSON file-based message storage
+  * Implementation Principle:
+    - Store messages in directories by date
+    - Use read-write locks to ensure concurrent safety
+    - Support batch message writing
+  * Advantages:
+    - No external dependencies
+    - Easy to view and maintain
+    - Support time-range queries
+  * Risks:
+    - File I/O may become performance bottleneck
+    - Need regular cleanup of expired data
+
+- MessageBatch
+  * Core Function: Message batch processing mechanism
+  * Implementation Principle:
+    - Message cache queue
+    - Trigger batch writes by time or quantity
+    - Asynchronous processing mechanism
+  * Advantages:
+    - Improve write performance
+    - Reduce disk I/O
+  * Risks:
+    - Potential risk of brief data loss
+    - Memory usage needs control
+
+- StorageMaintenanceTask
+  * Core Function: Storage maintenance tasks
+  * Implementation Principle:
+    - Snapshot Mechanism
+      * Implement scheduled tasks through Spring @Scheduled
+      * Create system snapshot every hour
+      * Snapshot contents include:
+        - Current status of all messages
+        - Message queue status
+        - Consumer subscription relationships
+      * Snapshot storage format:
+        - Named by time: YYYY-MM-DD-HH.json
+        - Storage path: data/snapshots/
+    - Automatic Expired Data Cleanup
+      * Execute cleanup at midnight daily
+      * Default retention of last 7 days data
+      * Cleanup scope includes messages and snapshots
+    - File Merge Optimization
+  * Advantages:
+    - Automated maintenance
+    - Optimize storage space
+    - Support system state rollback
+    - Facilitate problem diagnosis
+  * Risks:
+    - Maintenance process may affect performance
+    - Need proper maintenance time configuration
+    - Snapshots may occupy large storage space
+    - Need to balance snapshot frequency and storage overhead
+
+c) Heartbeat Monitoring Layer
+- HeartbeatSender
+  * Core Function: Heartbeat sender
+  * Implementation Principle:
+    - Implement UDP communication using Java DatagramSocket
+      * DatagramSocket is Java's UDP implementation
+      * Connectionless communication mode
+      * Can send data without establishing connection
+    - Scheduled mechanism (send every 5 seconds)
+    - Heartbeat package contents:
+      * Node status information
+      * Timestamp
+      * Node identifier
+  * Advantages:
+    - Low UDP protocol overhead
+      * No connection establishment needed
+      * No connection state maintenance
+    - Good real-time performance
+      * No connection establishment delay
+      * No connection termination overhead
+    - Suitable for frequent heartbeat detection
+  * Risks:
+    - UDP packets may be lost
+    - Need to handle network jitter
+
+- HeartbeatReceiver
+  * Core Function: Heartbeat receiver
+  * Implementation Principle:
+    - Implement UDP data reception using Java DatagramSocket
+      * Use same DatagramSocket mechanism as sender
+      * Listen for UDP packets on specified port
+      * Support asynchronous non-blocking reception
+    - Asynchronous Reception Mechanism
+    - Heartbeat Processing:
+      * Parse heartbeat package content
+      * Update node status
+      * Detect timeout situations
+  * Advantages:
+    - Timely detection of node anomalies
+    - Support dynamic configuration
+  * Risks:
+    - May have false judgments
+    - Need to handle network exceptions
+
+- FailureDetector
+  * Core Function: Failure detector
+  * Implementation Principle:
+    - Based on heartbeat timeout counting
+    - Role switching decision making
+    - Node priority judgment
+  * Advantages:
+    - Accurate failure determination
+    - Automated failure handling
+  * Risks:
+    - Network partition may cause split-brain
+    - Frequent switching affects stability
+
+4. Key Mechanisms
+-----------------
+4.1 High Availability Mechanism
+- Heartbeat Detection: Nodes perform heartbeat every 5 seconds
+- Failure Determination: Node failure determined after 3 consecutive heartbeat timeouts
+- Automatic Takeover: Slave node automatically takes over when master node failure detected
+- Graceful Degradation: Original master node automatically degrades to slave upon recovery
+
+4.2 Message Dispatch Strategies
+Support multiple message dispatch strategies:
+- Ordered Dispatch (ORDERED): Ensure messages processed in order
+- Round-Robin Dispatch (ROUND_ROBIN): Balance load
+- Priority Dispatch (PRIORITY): Support consumer priorities
+- Load Balancing (LOAD_BALANCE): Dynamic dispatch based on consumer load
+
+4.3 Storage Mechanism
+- Date Organization: Messages stored in directories by date
+- JSON Format: Easy to view and manage
+- Timed Snapshots: Create system snapshot every hour
+- Automatic Cleanup: Automatically clean expired data
+
+4.4 Monitoring Mechanism
+- Node Status Monitoring: Real-time monitoring of node running status
+- Heartbeat Monitoring: Monitor inter-node communication quality
+- Switch Event Monitoring: Record role switching history
+- Performance Metrics Monitoring: Monitor system key indicators
+
+5. Business Value
+-----------------
+5.1 High Availability
+- Master-slave architecture ensures uninterrupted service
+- Millisecond-level failure detection
+- Second-level service switching
+- Automatic failure recovery
+
+5.2 Reliability
+- Message persistent storage
+- Message processing confirmation mechanism
+- Complete monitoring and alerting
+
+5.3 Ease of Use
+- REST API interface
+- WebSocket real-time communication
+- Flexible configuration options
+- Simple deployment method
+
+5.4 Maintainability
+- Complete monitoring metrics
+- Detailed logging
+- Easy problem diagnosis
+- Support online historical message viewing
+
+6. Extensibility
+-----------------
+System design fully considers future expansion needs:
+- Support adding new dispatch strategies
+- Support extending storage methods
+- Support adding new monitoring metrics
+- Reserved cluster expansion interface
+
+7. Deployment Recommendations
+-----------------
+- Recommended deployment on two servers with identical configuration
+- Recommended specifications:
+  * CPU: 4+ cores
+  * Memory: 8GB+
+  * Disk: SSD 200GB+
+- Network requirements:
+  * Network latency between master and slave nodes < 50ms
+  * Bandwidth >= 100Mbps
+
+This architecture design fully considers system availability, reliability, and maintainability, capable of meeting message queue requirements for most business scenarios. The master-slave architecture ensures high service availability, while the comprehensive monitoring mechanism ensures system maintainability.
+
+[... Continue with the translation ...] 

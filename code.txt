@@ -1,44 +1,43 @@
-package com.example.messaging.websocket;
+package com.example.messaging.socket;
 
-import org.springframework.web.socket.WebSocketSession;
-
+import java.net.Socket;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * WebSocket会话管理器
+ * Socket会话管理器
  */
-public class WebSocketSessionManager {
-    private final Map<String, WebSocketSession> sessions = new ConcurrentHashMap<>();
-    private final Map<WebSocketSession, String> sessionIds = new ConcurrentHashMap<>();
-    private final Map<String, String> clientToSession = new ConcurrentHashMap<>();
+public class SocketSessionManager {
+    private final Map<String, Socket> sockets = new ConcurrentHashMap<>();
+    private final Map<Socket, String> socketIds = new ConcurrentHashMap<>();
+    private final Map<String, String> clientToSocket = new ConcurrentHashMap<>();
     
-    public void addSession(String sessionId, WebSocketSession session) {
-        sessions.put(sessionId, session);
-        sessionIds.put(session, sessionId);
+    public void addSocket(String socketId, Socket socket) {
+        sockets.put(socketId, socket);
+        socketIds.put(socket, socketId);
     }
     
-    public void removeSession(String sessionId) {
-        WebSocketSession session = sessions.remove(sessionId);
-        if (session != null) {
-            sessionIds.remove(session);
-            clientToSession.values().remove(sessionId);
+    public void removeSocket(String socketId) {
+        Socket socket = sockets.remove(socketId);
+        if (socket != null) {
+            socketIds.remove(socket);
+            clientToSocket.values().remove(socketId);
         }
     }
     
-    public WebSocketSession getSession(String sessionId) {
-        return sessions.get(sessionId);
+    public Socket getSocket(String socketId) {
+        return sockets.get(socketId);
     }
     
-    public String getSessionId(WebSocketSession session) {
-        return sessionIds.get(session);
+    public String getSocketId(Socket socket) {
+        return socketIds.get(socket);
     }
     
-    public void registerClientId(String sessionId, String clientId) {
-        clientToSession.put(clientId, sessionId);
+    public void registerClientId(String socketId, String clientId) {
+        clientToSocket.put(clientId, socketId);
     }
     
-    public String getSessionIdByClient(String clientId) {
-        return clientToSession.get(clientId);
+    public String getSocketIdByClient(String clientId) {
+        return clientToSocket.get(clientId);
     }
 }

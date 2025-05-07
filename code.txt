@@ -1,45 +1,40 @@
 package com.example.messaging.core.sender;
 
 import com.example.messaging.core.model.ProcessedMessage;
-import com.example.messaging.core.hub.MessageHub;
+import com.example.messaging.websocket.WebSocketSessionManager;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
-import org.springframework.web.client.RestTemplate;
+import org.springframework.web.socket.TextMessage;
+import org.springframework.web.socket.WebSocketSession;
+
+import java.io.IOException;
 
 /**
- * HTTP协议响应发送器
+ * WebSocket协议响应发送器
  */
 @Slf4j
 @Component
-public class HttpResponseSender implements ResponseSender {
-    private final RestTemplate restTemplate;
-    private final MessageHub messageHub;
+public class WebSocketResponseSender implements ResponseSender {
+    private final WebSocketSessionManager sessionManager;
     
     @Autowired
-    public HttpResponseSender(RestTemplate restTemplate, MessageHub messageHub) {
-        this.restTemplate = restTemplate;
-        this.messageHub = messageHub;
+    public WebSocketResponseSender(WebSocketSessionManager sessionManager) {
+        this.sessionManager = sessionManager;
     }
     
     @Override
     public void send(ProcessedMessage response) {
-        // 这里需要根据clientId获取HTTP回调地址
-        // 示例: 假设metadata中存储了callbackUrl
-        String callbackUrl = "http://client/callback"; // 实际应从会话信息获取
-        
-        try {
-            ResponseEntity<String> responseEntity = restTemplate.postForEntity(
-                callbackUrl, 
-                response.getResponseData(), 
-                String.class);
-            
-            if (!responseEntity.getStatusCode().is2xxSuccessful()) {
-                log.error("Failed to send HTTP response to client: {}", response.getClientId());
+        WebSocketSession session = sessionManager.getSession(response.getSessionId());
+        if (session != null && session.isOpen()) {
+            try {
+                session.sendMessage(new TextMessage(new String(response.getResponseData())));
+            } catch (IOException e) {
+                log.error("Failed to send WebSocket message to session: " + response.getSessionId(), e);
+                sessionManager.removeSession(response.getSessionId());
             }
-        } catch (Exception e) {
-            log.error("Error sending HTTP response to client: " + response.getClientId(), e);
+        } else {
+            log.warn("WebSocket session not found or closed: {}", response.getSessionId());
         }
     }
 }

@@ -1,41 +1,82 @@
-package com.example.messaging.controller;
+package com.example.messaging.websocket;
 
 import com.example.messaging.core.hub.MessageHub;
 import com.example.messaging.core.model.ProtocolType;
 import com.example.messaging.core.model.RawMessage;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.stereotype.Component;
+import org.springframework.web.socket.*;
 
 import java.util.UUID;
 
 /**
- * HTTP消息接收控制器
+ * WebSocket消息处理器
  */
 @Slf4j
-@RestController
-@RequestMapping("/api/messages")
-public class HttpMessageController {
+@Component
+public class MessageWebSocketHandler implements WebSocketHandler {
     private final MessageHub messageHub;
+    private final WebSocketSessionManager sessionManager;
     
-    @Autowired
-    public HttpMessageController(MessageHub messageHub) {
+    public MessageWebSocketHandler(MessageHub messageHub, WebSocketSessionManager sessionManager) {
         this.messageHub = messageHub;
+        this.sessionManager = sessionManager;
     }
     
-    @PostMapping
-    public String receiveMessage(@RequestBody byte[] data, 
-                               @RequestHeader("X-Client-Id") String clientId) {
-        RawMessage message = new RawMessage();
-        message.setClientId(clientId);
-        message.setProtocol(ProtocolType.HTTP);
-        message.setRawData(data);
-        message.setTimestamp(System.currentTimeMillis());
-        message.setSessionId(UUID.randomUUID().toString());
+    @Override
+    public void afterConnectionEstablished(WebSocketSession session) throws Exception {
+        String clientId = (String) session.getAttributes().get("clientId");
+        String sessionId = UUID.randomUUID().toString();
         
-        messageHub.addClientMessage(message);
-        log.info("Received HTTP message from client: {}", clientId);
+        sessionManager.addSession(sessionId, session);
+        log.info("WebSocket connection established: clientId={}, sessionId={}", clientId, sessionId);
+    }
+    
+    @Override
+    public void handleMessage(WebSocketSession session, WebSocketMessage<?> message) throws Exception {
+        String clientId = (String) session.getAttributes().get("clientId");
+        String sessionId = sessionManager.getSessionId(session);
         
-        return "Message accepted";
+        if (message instanceof BinaryMessage) {
+            BinaryMessage binaryMessage = (BinaryMessage) message;
+            RawMessage rawMessage = new RawMessage();
+            rawMessage.setClientId(clientId);
+            rawMessage.setProtocol(ProtocolType.WEBSOCKET);
+            rawMessage.setRawData(binaryMessage.getPayload().array());
+            rawMessage.setTimestamp(System.currentTimeMillis());
+            rawMessage.setSessionId(sessionId);
+            
+            messageHub.addClientMessage(rawMessage);
+            log.debug("Received WebSocket binary message from client: {}", clientId);
+        } else if (message instanceof TextMessage) {
+            // 文本消息也转为二进制处理
+            TextMessage textMessage = (TextMessage) message;
+            RawMessage rawMessage = new RawMessage();
+            rawMessage.setClientId(clientId);
+            rawMessage.setProtocol(ProtocolType.WEBSOCKET);
+            rawMessage.setRawData(textMessage.asBytes());
+            rawMessage.setTimestamp(System.currentTimeMillis());
+            rawMessage.setSessionId(sessionId);
+            
+            messageHub.addClientMessage(rawMessage);
+            log.debug("Received WebSocket text message from client: {}", clientId);
+        }
+    }
+    
+    @Override
+    public void handleTransportError(WebSocketSession session, Throwable exception) throws Exception {
+        log.error("WebSocket transport error: " + session.getId(), exception);
+    }
+    
+    @Override
+    public void afterConnectionClosed(WebSocketSession session, CloseStatus closeStatus) throws Exception {
+        String sessionId = sessionManager.getSessionId(session);
+        sessionManager.removeSession(sessionId);
+        log.info("WebSocket connection closed: {}, status={}", sessionId, closeStatus);
+    }
+    
+    @Override
+    public boolean supportsPartialMessages() {
+        return false;
     }
 }

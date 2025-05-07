@@ -1,43 +1,29 @@
-package com.example.messaging.socket;
+package com.example.messaging.config;
 
-import java.net.Socket;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
+import com.example.messaging.websocket.MessageWebSocketHandler;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.web.socket.config.annotation.EnableWebSocket;
+import org.springframework.web.socket.config.annotation.WebSocketConfigurer;
+import org.springframework.web.socket.config.annotation.WebSocketHandlerRegistry;
 
 /**
- * Socket会话管理器
+ * WebSocket配置
  */
-public class SocketSessionManager {
-    private final Map<String, Socket> sockets = new ConcurrentHashMap<>();
-    private final Map<Socket, String> socketIds = new ConcurrentHashMap<>();
-    private final Map<String, String> clientToSocket = new ConcurrentHashMap<>();
+@Configuration
+@EnableWebSocket
+public class WebSocketConfig implements WebSocketConfigurer {
+    private final MessageWebSocketHandler messageWebSocketHandler;
     
-    public void addSocket(String socketId, Socket socket) {
-        sockets.put(socketId, socket);
-        socketIds.put(socket, socketId);
+    @Autowired
+    public WebSocketConfig(MessageWebSocketHandler messageWebSocketHandler) {
+        this.messageWebSocketHandler = messageWebSocketHandler;
     }
     
-    public void removeSocket(String socketId) {
-        Socket socket = sockets.remove(socketId);
-        if (socket != null) {
-            socketIds.remove(socket);
-            clientToSocket.values().remove(socketId);
-        }
-    }
-    
-    public Socket getSocket(String socketId) {
-        return sockets.get(socketId);
-    }
-    
-    public String getSocketId(Socket socket) {
-        return socketIds.get(socket);
-    }
-    
-    public void registerClientId(String socketId, String clientId) {
-        clientToSocket.put(clientId, socketId);
-    }
-    
-    public String getSocketIdByClient(String clientId) {
-        return clientToSocket.get(clientId);
+    @Override
+    public void registerWebSocketHandlers(WebSocketHandlerRegistry registry) {
+        registry.addHandler(messageWebSocketHandler, "/ws/messages")
+                .setAllowedOrigins("*")
+                .addInterceptors(new HttpSessionHandshakeInterceptor());
     }
 }

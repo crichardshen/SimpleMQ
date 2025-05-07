@@ -1,40 +1,41 @@
-yypackage com.example.messaging.core.sender;
+package com.example.messaging.controller;
 
-import com.example.messaging.core.model.ProcessedMessage;
-import com.example.messaging.websocket.WebSocketSessionManager;
+import com.example.messaging.core.hub.MessageHub;
+import com.example.messaging.core.model.ProtocolType;
+import com.example.messaging.core.model.RawMessage;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.stereotype.Component;
-import org.springframework.web.socket.TextMessage;
-import org.springframework.web.socket.WebSocketSession;
+import org.springframework.web.bind.annotation.*;
 
-import java.io.IOException;
+import java.util.UUID;
 
 /**
- * WebSocket协议响应发送器
+ * HTTP消息接收控制器
  */
 @Slf4j
-@Component
-public class WebSocketResponseSender implements ResponseSender {
-    private final WebSocketSessionManager sessionManager;
+@RestController
+@RequestMapping("/api/messages")
+public class HttpMessageController {
+    private final MessageHub messageHub;
     
     @Autowired
-    public WebSocketResponseSender(WebSocketSessionManager sessionManager) {
-        this.sessionManager = sessionManager;
+    public HttpMessageController(MessageHub messageHub) {
+        this.messageHub = messageHub;
     }
     
-    @Override
-    public void send(ProcessedMessage response) {
-        WebSocketSession session = sessionManager.getSession(response.getSessionId());
-        if (session != null && session.isOpen()) {
-            try {
-                session.sendMessage(new TextMessage(new String(response.getResponseData())));
-            } catch (IOException e) {
-                log.error("Failed to send WebSocket message to session: " + response.getSessionId(), e);
-                sessionManager.removeSession(response.getSessionId());
-            }
-        } else {
-            log.warn("WebSocket session not found or closed: {}", response.getSessionId());
-        }
+    @PostMapping
+    public String receiveMessage(@RequestBody byte[] data, 
+                               @RequestHeader("X-Client-Id") String clientId) {
+        RawMessage message = new RawMessage();
+        message.setClientId(clientId);
+        message.setProtocol(ProtocolType.HTTP);
+        message.setRawData(data);
+        message.setTimestamp(System.currentTimeMillis());
+        message.setSessionId(UUID.randomUUID().toString());
+        
+        messageHub.addClientMessage(message);
+        log.info("Received HTTP message from client: {}", clientId);
+        
+        return "Message accepted";
     }
 }

@@ -1,101 +1,44 @@
-package com.example.messaging.socket;
+package com.example.messaging.websocket;
 
-import com.example.messaging.core.hub.MessageHub;
-import com.example.messaging.core.model.ProtocolType;
-import com.example.messaging.core.model.RawMessage;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.context.event.ApplicationReadyEvent;
-import org.springframework.context.event.EventListener;
-import org.springframework.stereotype.Component;
+import org.springframework.web.socket.WebSocketSession;
 
-import java.io.IOException;
-import java.net.ServerSocket;
-import java.net.Socket;
-import java.util.UUID;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Socket消息接收服务器
+ * WebSocket会话管理器
  */
-@Slf4j
-@Component
-public class SocketMessageServer {
-    private final MessageHub messageHub;
-    private final SocketSessionManager sessionManager;
-    private final ExecutorService executorService;
-    private final int socketPort;
+public class WebSocketSessionManager {
+    private final Map<String, WebSocketSession> sessions = new ConcurrentHashMap<>();
+    private final Map<WebSocketSession, String> sessionIds = new ConcurrentHashMap<>();
+    private final Map<String, String> clientToSession = new ConcurrentHashMap<>();
     
-    public SocketMessageServer(MessageHub messageHub, 
-                             SocketSessionManager sessionManager,
-                             @Value("${socket.server.port:9090}") int socketPort) {
-        this.messageHub = messageHub;
-        this.sessionManager = sessionManager;
-        this.executorService = Executors.newCachedThreadPool();
-        this.socketPort = socketPort;
+    public void addSession(String sessionId, WebSocketSession session) {
+        sessions.put(sessionId, session);
+        sessionIds.put(session, sessionId);
     }
     
-    @EventListener(ApplicationReadyEvent.class)
-    public void start() {
-        new Thread(() -> {
-            try (ServerSocket serverSocket = new ServerSocket(socketPort)) {
-                log.info("Socket server started on port {}", socketPort);
-                
-                while (!Thread.currentThread().isInterrupted()) {
-                    Socket socket = serverSocket.accept();
-                    String sessionId = UUID.randomUUID().toString();
-                    sessionManager.addSocket(sessionId, socket);
-                    
-                    executorService.submit(() -> handleClient(socket, sessionId));
-                }
-            } catch (IOException e) {
-                log.error("Socket server error", e);
-            }
-        }).start();
-    }
-    
-    private void handleClient(Socket socket, String sessionId) {
-        String clientId = null;
-        try {
-            // 假设第一个消息是客户端ID
-            byte[] buffer = new byte[1024];
-            int bytesRead = socket.getInputStream().read(buffer);
-            if (bytesRead > 0) {
-                clientId = new String(buffer, 0, bytesRead).trim();
-                sessionManager.registerClientId(sessionId, clientId);
-                
-                log.info("Socket client connected: {} (sessionId={})", clientId, sessionId);
-                
-                // 持续读取消息
-                while (!socket.isClosed()) {
-                    bytesRead = socket.getInputStream().read(buffer);
-                    if (bytesRead == -1) {
-                        break; // 连接关闭
-                    }
-                    
-                    RawMessage message = new RawMessage();
-                    message.setClientId(clientId);
-                    message.setProtocol(ProtocolType.SOCKET);
-                    message.setRawData(Arrays.copyOf(buffer, bytesRead));
-                    message.setTimestamp(System.currentTimeMillis());
-                    message.setSessionId(sessionId);
-                    
-                    messageHub.addClientMessage(message);
-                    log.debug("Received Socket message from client: {}", clientId);
-                }
-            }
-        } catch (IOException e) {
-            log.error("Socket client error: " + (clientId != null ? clientId : "unknown"), e);
-        } finally {
-            sessionManager.removeSocket(sessionId);
-            try {
-                socket.close();
-            } catch (IOException e) {
-                log.error("Error closing socket", e);
-            }
-            log.info("Socket client disconnected: {} (sessionId={})", 
-                clientId != null ? clientId : "unknown", sessionId);
+    public void removeSession(String sessionId) {
+        WebSocketSession session = sessions.remove(sessionId);
+        if (session != null) {
+            sessionIds.remove(session);
+            clientToSession.values().remove(sessionId);
         }
+    }
+    
+    public WebSocketSession getSession(String sessionId) {
+        return sessions.get(sessionId);
+    }
+    
+    public String getSessionId(WebSocketSession session) {
+        return sessionIds.get(session);
+    }
+    
+    public void registerClientId(String sessionId, String clientId) {
+        clientToSession.put(clientId, sessionId);
+    }
+    
+    public String getSessionIdByClient(String clientId) {
+        return clientToSession.get(clientId);
     }
 }

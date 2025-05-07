@@ -1,0 +1,144 @@
+package com.example.messaging.core.processor;
+
+import com.example.messaging.core.model.*;
+import com.example.messaging.core.hub.MessageHub;
+import com.example.messaging.core.sender.ResponseSenderFactory;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.scheduling.annotation.Async;
+import org.springframework.stereotype.Service;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Optional;
+import java.util.concurrent.*;
+
+/**
+ * 消息处理流水线服务
+ */
+@Slf4j
+@Service
+public class MessageProcessor {
+    private final MessageHub messageHub;
+    private final ExecutorService processingPool;
+    
+    @Autowired
+    public MessageProcessor(MessageHub messageHub) {
+        this.messageHub = messageHub;
+        this.processingPool = Executors.newWorkStealingPool();
+    }
+    
+    /**
+     * 启动消息处理循环
+     */
+    @Async
+    public void startProcessing() {
+        while (true) {
+            try {
+                // 1. 处理客户端消息
+                processClientMessages();
+                
+                // 2. 处理下游响应
+                processDownstreamResponses();
+                
+                // 短暂休眠避免CPU空转
+                TimeUnit.MILLISECONDS.sleep(100);
+            } catch (InterruptedException e) {
+                log.warn("Message processing loop interrupted", e);
+                Thread.currentThread().interrupt();
+                break;
+            } catch (Exception e) {
+                log.error("Error in message processing loop", e);
+            }
+        }
+    }
+    
+    /**
+     * 处理客户端原始消息
+     */
+    private void processClientMessages() {
+        messageHub.getClientMessageQueues().forEach((clientId, queue) -> {
+            RawMessage rawMessage = queue.poll();
+            if (rawMessage != null) {
+                processingPool.submit(() -> {
+                    try {
+                        // 1. 解包消息(处理粘包情况)
+                        List<CleanMessage> cleanMessages = unpackMessages(rawMessage);
+                        
+                        // 2. 转发到下游系统
+                        forwardToDownstream(cleanMessages);
+                    } catch (Exception e) {
+                        log.error("Failed to process message from client: " + clientId, e);
+                    }
+                });
+            }
+        });
+    }
+    
+    /**
+     * 处理下游系统响应
+     */
+    private void processDownstreamResponses() {
+        Optional<ProcessedMessage> responseOpt;
+        while ((responseOpt = messageHub.pollResponse()).isPresent()) {
+            ProcessedMessage response = responseOpt.get();
+            processingPool.submit(() -> {
+                try {
+                    // 根据协议类型发送响应给客户端
+                    ResponseSenderFactory.getSender(response.getProtocol())
+                        .send(response);
+                } catch (Exception e) {
+                    log.error("Failed to send response to client: " + response.getClientId(), e);
+                }
+            });
+        }
+    }
+    
+    /**
+     * 解包原始消息(处理粘包)
+     */
+    private List<CleanMessage> unpackMessages(RawMessage rawMessage) {
+        List<CleanMessage> messages = new ArrayList<>();
+        // 这里实现具体的解包逻辑
+        // 示例: 假设消息以\n分隔
+        String combined = new String(rawMessage.getRawData());
+        String[] parts = combined.split("\n");
+        
+        for (String part : parts) {
+            if (!part.trim().isEmpty()) {
+                CleanMessage cleanMessage = new CleanMessage();
+                cleanMessage.setClientId(rawMessage.getClientId());
+                cleanMessage.setMessageId(UUID.randomUUID().toString());
+                cleanMessage.setContent(part);
+                cleanMessage.setMetadata(new HashMap<>());
+                messages.add(cleanMessage);
+            }
+        }
+        
+        return messages;
+    }
+    
+    /**
+     * 转发消息到下游系统
+     */
+    private void forwardToDownstream(List<CleanMessage> messages) {
+        // 这里实现下游系统通信逻辑
+        // 示例: 模拟下游处理
+        messages.forEach(msg -> {
+            ProcessedMessage response = new ProcessedMessage();
+            response.setMessageId(msg.getMessageId());
+            response.setClientId(msg.getClientId());
+            response.setProtocol(ProtocolType.valueOf(msg.getMetadata().get("protocol").toString()));
+            response.setResponseData(("Processed: " + msg.getContent()).getBytes());
+            
+            // 模拟处理延迟
+            try {
+                TimeUnit.MILLISECONDS.sleep(100);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            
+            messageHub.addDownstreamResponse(response);
+        });
+    }
+}

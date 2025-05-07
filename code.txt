@@ -1,40 +1,47 @@
 package com.example.messaging.core.sender;
 
 import com.example.messaging.core.model.ProcessedMessage;
-import com.example.messaging.websocket.WebSocketSessionManager;
+import com.example.messaging.socket.SocketSessionManager;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
-import org.springframework.web.socket.TextMessage;
-import org.springframework.web.socket.WebSocketSession;
 
 import java.io.IOException;
+import java.io.OutputStream;
+import java.net.Socket;
 
 /**
- * WebSocket协议响应发送器
+ * Socket协议响应发送器
  */
 @Slf4j
 @Component
-public class WebSocketResponseSender implements ResponseSender {
-    private final WebSocketSessionManager sessionManager;
+public class SocketResponseSender implements ResponseSender {
+    private final SocketSessionManager sessionManager;
     
     @Autowired
-    public WebSocketResponseSender(WebSocketSessionManager sessionManager) {
+    public SocketResponseSender(SocketSessionManager sessionManager) {
         this.sessionManager = sessionManager;
     }
     
     @Override
     public void send(ProcessedMessage response) {
-        WebSocketSession session = sessionManager.getSession(response.getSessionId());
-        if (session != null && session.isOpen()) {
+        Socket socket = sessionManager.getSocket(response.getSessionId());
+        if (socket != null && !socket.isClosed()) {
             try {
-                session.sendMessage(new TextMessage(new String(response.getResponseData())));
+                OutputStream out = socket.getOutputStream();
+                out.write(response.getResponseData());
+                out.flush();
             } catch (IOException e) {
-                log.error("Failed to send WebSocket message to session: " + response.getSessionId(), e);
-                sessionManager.removeSession(response.getSessionId());
+                log.error("Failed to send Socket message to session: " + response.getSessionId(), e);
+                sessionManager.removeSocket(response.getSessionId());
+                try {
+                    socket.close();
+                } catch (IOException ex) {
+                    log.error("Error closing socket", ex);
+                }
             }
         } else {
-            log.warn("WebSocket session not found or closed: {}", response.getSessionId());
+            log.warn("Socket session not found or closed: {}", response.getSessionId());
         }
     }
 }

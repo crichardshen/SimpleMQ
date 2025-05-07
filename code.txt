@@ -1,29 +1,25 @@
 package com.example.messaging.config;
 
-import com.example.messaging.websocket.MessageWebSocketHandler;
+import com.example.messaging.core.processor.MessageProcessor;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.CommandLineRunner;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.web.socket.config.annotation.EnableWebSocket;
-import org.springframework.web.socket.config.annotation.WebSocketConfigurer;
-import org.springframework.web.socket.config.annotation.WebSocketHandlerRegistry;
 
 /**
- * WebSocket配置
+ * 应用启动配置
  */
 @Configuration
-@EnableWebSocket
-public class WebSocketConfig implements WebSocketConfigurer {
-    private final MessageWebSocketHandler messageWebSocketHandler;
+public class AppStartupConfig implements CommandLineRunner {
+    private final MessageProcessor messageProcessor;
     
     @Autowired
-    public WebSocketConfig(MessageWebSocketHandler messageWebSocketHandler) {
-        this.messageWebSocketHandler = messageWebSocketHandler;
+    public AppStartupConfig(MessageProcessor messageProcessor) {
+        this.messageProcessor = messageProcessor;
     }
     
     @Override
-    public void registerWebSocketHandlers(WebSocketHandlerRegistry registry) {
-        registry.addHandler(messageWebSocketHandler, "/ws/messages")
-                .setAllowedOrigins("*")
-                .addInterceptors(new HttpSessionHandshakeInterceptor());
+    public void run(String... args) throws Exception {
+        // 启动消息处理循环
+        messageProcessor.startProcessing();
     }
 }

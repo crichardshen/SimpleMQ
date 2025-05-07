@@ -1,41 +1,20 @@
-package com.example.messaging.exception;
+# Server port
+server.port=8080
 
-import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.ControllerAdvice;
-import org.springframework.web.bind.annotation.ExceptionHandler;
-import org.springframework.web.context.request.WebRequest;
+# Socket server port
+socket.server.port=9090
 
-import java.util.Date;
-import java.util.LinkedHashMap;
-import java.util.Map;
+# Thread pool settings
+spring.task.execution.pool.core-size=10
+spring.task.execution.pool.max-size=50
+spring.task.execution.pool.queue-capacity=1000
 
-/**
- * 全局异常处理器
- */
-@ControllerAdvice
-public class GlobalExceptionHandler {
-    @ExceptionHandler(Exception.class)
-    public ResponseEntity<Object> handleAllExceptions(Exception ex, WebRequest request) {
-        Map<String, Object> body = new LinkedHashMap<>();
-        body.put("timestamp", new Date());
-        body.put("status", HttpStatus.INTERNAL_SERVER_ERROR.value());
-        body.put("error", "Internal Server Error");
-        body.put("message", ex.getMessage());
-        body.put("path", request.getDescription(false));
-        
-        return new ResponseEntity<>(body, HttpStatus.INTERNAL_SERVER_ERROR);
-    }
-    
-    @ExceptionHandler(IllegalArgumentException.class)
-    public ResponseEntity<Object> handleIllegalArgumentException(IllegalArgumentException ex, WebRequest request) {
-        Map<String, Object> body = new LinkedHashMap<>();
-        body.put("timestamp", new Date());
-        body.put("status", HttpStatus.BAD_REQUEST.value());
-        body.put("error", "Bad Request");
-        body.put("message", ex.getMessage());
-        body.put("path", request.getDescription(false));
-        
-        return new ResponseEntity<>(body, HttpStatus.BAD_REQUEST);
-    }
-}
+# WebSocket settings
+spring.websocket.allowed-origins=*
+
+# HTTP settings
+spring.servlet.multipart.max-file-size=10MB
+spring.servlet.multipart.max-request-size=10MB
+
+# Logging
+logging.level.com.example.messaging=DEBUG

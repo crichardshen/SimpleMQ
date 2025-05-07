@@ -1,32 +1,45 @@
 package com.example.messaging.core.sender;
 
-import com.example.messaging.core.model.ProtocolType;
+import com.example.messaging.core.model.ProcessedMessage;
+import com.example.messaging.core.hub.MessageHub;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.context.ApplicationContext;
+import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
+import org.springframework.web.client.RestTemplate;
 
 /**
- * 响应发送器工厂
+ * HTTP协议响应发送器
  */
+@Slf4j
 @Component
-public class ResponseSenderFactory {
-    private static ApplicationContext applicationContext;
+public class HttpResponseSender implements ResponseSender {
+    private final RestTemplate restTemplate;
+    private final MessageHub messageHub;
     
     @Autowired
-    public ResponseSenderFactory(ApplicationContext applicationContext) {
-        ResponseSenderFactory.applicationContext = applicationContext;
+    public HttpResponseSender(RestTemplate restTemplate, MessageHub messageHub) {
+        this.restTemplate = restTemplate;
+        this.messageHub = messageHub;
     }
     
-    public static ResponseSender getSender(ProtocolType protocol) {
-        switch (protocol) {
-            case SOCKET:
-                return applicationContext.getBean(SocketResponseSender.class);
-            case WEBSOCKET:
-                return applicationContext.getBean(WebSocketResponseSender.class);
-            case HTTP:
-                return applicationContext.getBean(HttpResponseSender.class);
-            default:
-                throw new IllegalArgumentException("Unsupported protocol: " + protocol);
+    @Override
+    public void send(ProcessedMessage response) {
+        // 这里需要根据clientId获取HTTP回调地址
+        // 示例: 假设metadata中存储了callbackUrl
+        String callbackUrl = "http://client/callback"; // 实际应从会话信息获取
+        
+        try {
+            ResponseEntity<String> responseEntity = restTemplate.postForEntity(
+                callbackUrl, 
+                response.getResponseData(), 
+                String.class);
+            
+            if (!responseEntity.getStatusCode().is2xxSuccessful()) {
+                log.error("Failed to send HTTP response to client: {}", response.getClientId());
+            }
+        } catch (Exception e) {
+            log.error("Error sending HTTP response to client: " + response.getClientId(), e);
         }
     }
 }

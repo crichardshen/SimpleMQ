@@ -1,0 +1,170 @@
+I. Introduction
+1.1- Purpose
+Per requirements from DBS to replace ActiveMQ by self-development new program, this document will elaborate the information about new program from architecture view.
+To convenience in subsequent content, the new program will be named as SimpleMQ.
+
+1.2- Terminology
+Term	Description
+Controller	The component as receiver to accept the request and message from outsider 
+Broker	The component as coordinator to assign request and message from controller to appropriate component for further handling
+Processer	The component to process message on content level, e.g. validation, formatting, content change
+Dispatcher 	The component to send out message to outsider
+Heartbeat	The MQ on multiple servers’ node to do data package communication so that to make the MQs’ alive status
+JSON storage	The component to restore message as JSON format in physical local file
+	
+
+II. System overview:
+SimpleMQ is a lightweight message queue system with a master-slave architecture design.
+The system supports multiple message dispatch strategies, provides real-time message processing capabilities, 
+and includes message storage and monitoring mechanisms.
+  
+After flipped, original secondary(right side in below pic) will take role as primary to do message transference component.
+ 
+2.1- Business requirement
+- The new program should provide 7*24 functions for message among ATMH, JETCO, EPSCO
+- The message through new program should be no format, content change
+- There should be monitoring mechanism and alert if any issue occurred 
+
+2.2- System target
+- The new MQ can handle and simulate AMQ functions on message receive, dispatch, storage
+- The new MQ should provide 7*24 functions expect server or service regular patching and CR change
+- The new MQ should provide auto-failover mechanism, in case one node service is down or has issue, the other node service can be automatically activated
+- About message volume, there are around 270K messages will be handled by CONEGW AMQ in existing production, and 40% will be handed from 1000 – 1400 each weekday. For the new program, will set the message volume target based on load test requirement, which will be 270K * 10 around 3000K (three million) Assume one message will be 2000 byte (around 1.9KB), then total volume in one week will be around 5.7GB (around 817 MB per day / 12 message per second)
+
+2.3- System work scope
+- The MQ will ONLY receive and dispatch message from existing programs in CONEGW, and these programs should be only ones who can contact.
+- The MQ will do necessarily message validation but no content or format change
+- The MQ will restore the message in local as physical file with JSON format, and will NOT do synchronization between the server nodes
+- The MQ will do necessarily log and monitoring (mainly in network status) for production support and issue investigation
+- The MQ will do housekeeping for 7 day’s local physical file data
+- The MQ will NOT handle brain split
+
+III. System Architecture
+SimpleMQ adopts a master-slave architecture consisting of two identical nodes
+Node Name	Responsibility	Principle
+Master Node (e.g., 1a)	Handle all message reception and distribution	Control message processing permissions through active flag
+Slave Node (e.g., 2a)	Act as hot backup, monitor master node status	Receive heartbeats in real-time, maintain ready state
+
+3.1- Automatic Failover Mechanism
+3.1.1- Working Principle:
+- Master node sends "I'm alive" signal (heartbeat) to slave every 5 seconds
+- Slave node records the last time master node "reported safe"
+- If no signal is received from master node for 15 seconds (3 times), slave node assumes master node has failed
+
+3.1.2- Failover scenarios
+- The server itself has issue and down
+- The program/service itself has issue and down
+- Manual switch the failover by auto-job (e.g. TWS) due to server maintenance or change
+
+3.1.2- Failure Handling Process:
+Below steps explain the criteria and the follow up when slave node discovers potential master node failure
+Step 1	Heartbeat Counter	 Must miss 3 consecutive heartbeats (15 seconds) to trigger confirmation
+    - Avoids temporary heartbeat loss due to network jitter
+		
+Step 2	Master Node Status Verification	 Check the latest status information sent by master node
+    - Heartbeat package contains current node status (RUNNING)
+    - Contains node current role (MASTER/SLAVE)
+    - Contains key performance metrics (CPU usage, memory usage, etc.)
+
+** detail Status Judgment Logic**:
+- If last status is RUNNING:
+      * Need to consider last heartbeat time
+      * If last heartbeat within 15 seconds: Might be temporary network issue, continue monitoring
+      * If last heartbeat over 15 seconds:
+               - Node might have crashed suddenly
+               - Or node completely disconnected from network
+               - Only consider switching in this case
+		
+Step3	Network Connectivity Test	Try connecting to master node through by network and confirm 
+if master node is truly unreachable, will activate local controller and broker to start work
+
+		
+Step4	Running time Comparison	If the connection can be reached after step3, to check running time of local and opposite nodes
+     - Avoid newly restarted node mistakenly becoming master
+		
+Step5	Original node’s downgrade	Original master node automatically downgrades to slave when recovered
+
+
+3.2- Heartbeat Monitoring Mechanism
+The MQ will be two-way heartbeat between the nodes
+Component	Description	Key points
+Heartbeat sender		1- Implement UDP communication using Java DatagramSocket
+    * DatagramSocket is Java's UDP implementation
+    * Connectionless communication mode
+    * Can send data without establishing connection
+2- Scheduled mechanism (send every 5 seconds)
+3- Heartbeat package contents:
+    * Node status information
+    * Timestamp
+    * Node identifier
+		
+Heartbeat receiver		1- Implement UDP data reception using Java DatagramSocket
+    * Use same DatagramSocket mechanism as sender
+    * Listen for UDP packets on specified port
+    * Support asynchronous non-blocking reception
+2- Asynchronous Reception Mechanism
+3- Heartbeat Processing:
+    * Parse heartbeat package content
+    * Update node status
+    * Detect timeout situations
+		
+Failure detector		1- Based on heartbeat timeout counting
+2- Role switching decision making
+3- Node priority judgment
+
+3.3- Core component
+Component	Description	Key points
+Broker	Message reception and distribution
+	1- Adopts singleton pattern design
+- Ensures only one Broker instance per node
+- Managed by Spring container
+
+2- Work Responsibilities: 
+- Overall Process Coordination
+    * Receive producer messages
+    * Manage subscription relationships
+    * Schedule processing workflows
+- System Management
+    * Monitor component status
+    * Resource allocation
+    * System configuration
+		
+Processor	Ensures reliable message processing	1- Pre-processing
+    * Message format validation
+    * Message decoding
+    * Format conversion
+2- Core Processing
+    * Business logic processing
+    * Message content processing
+    * Message transformation/enrichment
+3- Asynchronous Processing for different message topic
+    * Use thread pool for message processing
+    * Support parallel processing
+    * Processing timeout control
+		
+Dispatcher	Supports multiple dispatch strategies	1- Strategy pattern implements different dispatch algorithms
+2- Consumer registration and deregistration mechanism
+3- Dispatch Management
+    * Message dispatch strategy execution
+    * Consumer selection and management
+    * Message queue mapping maintenance
+4- Status Management
+    * Message Status Tracking
+        - DELIVERING: Message is being delivered
+        - DELIVERED: Message successfully delivered and confirmed
+        - FAILED: Delivery failed or rejected
+        - TIMEOUT: Delivery timeout
+    * Retry Mechanism
+        - Automatic retry on failure
+        - Configurable retry count and interval
+        - Enter dead letter queue after exceeding retry limit
+5- Post Processing
+    * Consumer callback notification
+    * Failure retries processing
+    * Dead letter handling
+		
+JSON Storage	JSON file-based message storage	1- Store messages in directories by date
+2- Use read-write locks to ensure concurrent safety
+3- Support batch message writing
+
+

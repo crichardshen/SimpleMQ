@@ -1,0 +1,119 @@
+1. Functional User Stories
+
+Message Reception & Processing
+
+US001 - Receive External System Messages
+As ATMH/JETCO/EPSCO systems
+I want to send messages to any available SimpleMQ server
+So that messages can be reliably delivered to target systems
+Acceptance Criteria:
+
+Supports socket connection
+Returns clear success/failure responses (e.g., HTTP 200/500)
+US002 - Message Content Consistency Guarantee
+As a business system (e.g., ATMH)
+I want SimpleMQ to preserve message content and format without modification
+So that messages maintain their original semantics during transmission
+Acceptance Criteria:
+
+Output message binary content exactly matches input
+Message headers (e.g., MessageID) remain unaltered
+US003 - Message Validation
+As SimpleMQ operations team
+I want MQ to validate message bodies based on header length
+So that malformed messages are prevented from entering the system
+Acceptance Criteria:
+
+Rejects messages with header length mismatch and returns error code
+Error logs must include message ID and failure reason
+Message Distribution & Failover
+
+US004 - Round-Robin Server Selection
+As an external system (e.g., JETCO)
+I want to connect to SimpleMQ servers A or B using round-robin strategy
+So that basic load balancing is achieved
+Acceptance Criteria:
+
+External systems alternate connections (A→B→A→B)
+Node selection logic is implemented by external systems, not MQ
+US005 - Automatic Failover
+As an external system (e.g., EPSCO)
+I want to automatically try another server when connection fails
+So that message transmission high availability is ensured
+Acceptance Criteria:
+
+Retries alternate node within 5 seconds after initial failure
+Maximum 3 retries before throwing exception
+Applies to MQ→external system connection failover
+US006 - Support Multiple Dispatch Strategies (Future Enhancement)
+As system administrator
+I want configurable message dispatch strategies (round-robin, random, active-active, etc.)
+So that different business scenarios can be accommodated
+Acceptance Criteria:
+
+Default strategy is round-robin
+Configurable via configuration file
+Storage & Logging
+
+US007 - Local Message Storage (JSON Files)
+As operations staff
+I want all messages stored locally as JSON files organized by date
+So that audit and troubleshooting are supported
+Acceptance Criteria:
+
+Storage path format: /data/messages/{YYYYMMDD}/{HH}/{MessageID}.json
+File content includes complete message headers and body
+US008 - Logging & Monitoring
+As technical support team
+I want SimpleMQ to log key operations (message receipt, dispatch, errors)
+So that issues can be quickly identified
+Acceptance Criteria:
+
+Log levels: ERROR (failed operations), WARN (retries), INFO (key steps)
+Log fields include: timestamp, message ID, operation type, status code
+US009 - Automatic Data Cleanup
+As system administrator
+I want SimpleMQ to automatically purge message files older than 7 days
+So that storage space is conserved
+Acceptance Criteria:
+
+Daily cleanup job runs at 01:00
+Deletes subdirectories under /data/messages/ older than 7 days
+2. Non-Functional User Stories
+
+Performance & Reliability
+
+NF001 - High Throughput Support
+As business user
+I want SimpleMQ to handle peak loads of 12 messages/second (~3M/week)
+So that business peak demands are met
+Acceptance Criteria:
+
+P99 latency <500ms during sustained 1-hour peak load
+Message backlog never exceeds 1,000 messages
+NF002 - 24/7 Availability
+As business stakeholder
+I want SimpleMQ to remain available outside maintenance windows
+So that normal business operations aren't impacted
+Acceptance Criteria:
+
+Scheduled maintenance windows ≤2 hours/month (with advance notice)
+Unscheduled downtime <0.1% annually
+Security & Maintenance
+
+NF003 - CONEGW-Only Access
+As security administrator
+I want SimpleMQ to only accept connections from CONEGW internal systems
+So that unauthorized access is prevented
+Acceptance Criteria:
+
+IP whitelist restriction (e.g., 10.0.0.0/8)
+Unauthorized connection attempts are logged
+NF004 - No Single Point of Failure
+As architect
+I want two SimpleMQ servers operating simultaneously to avoid SPOF
+So that system reliability is improved
+Acceptance Criteria:
+
+Single node failure doesn't impact overall service
+Failed nodes automatically rejoin service pool after recovery

@@ -1,0 +1,170 @@
+1. Introduction
+
+1.1 Purpose
+
+This document defines the functional requirements for SimpleMQ, a lightweight message queue system designed to replace ActiveMQ, ensuring reliable message transfer between ATMH, JETCO, and EPSCO systems.
+
+1.2 Scope
+
+Included:
+Message reception, validation, storage, and forwarding.
+Dual-node active-active architecture (no master-slave).
+Local JSON storage (7-day retention).
+Automatic failover (client-side retry).
+Excluded:
+Message transformation or enrichment.
+Cross-node data synchronization.
+Brain-split handling.
+1.3 Definitions & Abbreviations
+
+Term	Definition
+ATMH	ATM Host System
+JSON Storage	Local message storage in JSON format
+CONEGW	Core Network Gateway
+2. Business Process
+
+2.1 Message Transmission Process
+
+Description: End-to-end message flow between banking systems.
+Process Steps:
+
+ATMH connects to SimpleMQ (Node A or B via round-robin).
+SimpleMQ validates and stores the message (JSON file).
+SimpleMQ forwards the message to JETCO/EPSCO.
+Response follows the reverse path.
+Assumption: External systems handle retries on failure.
+2.2 Failover Process
+
+Description: Automatic switch to the backup node if the primary fails.
+Process Steps:
+
+Client detects a connection failure (timeout or rejection).
+System retries the alternate SimpleMQ node (max 3 attempts).
+If all retries fail, pauses for 5 minutes before retrying.
+Assumption: Failures are temporary (network blips, service restart).
+3. Specific Requirements
+
+3.1 Functional Requirements
+
+3.1.1 US001 - Socket Message Reception
+Description: Accept messages via TCP socket.
+Input:
+
+TCP connection on port 8080.
+Message with header (metadata) and body (payload).
+Output:
+200 OK + Message ID (success).
+400 Bad Request (validation failed).
+Acceptance Criteria:
+Supports 50+ concurrent connections.
+Responds within 100ms under normal load.
+
+3.1.2 US002 - Message Content Integrity
+Description: Ensure no modification of message content.
+Input: Raw message from ATMH/JETCO/EPSCO.
+Output: Forwarded message with identical binary content.
+Acceptance Criteria:
+SHA-256 checksum matches before/after transmission.
+
+3.1.3 US003 - Message Header Validation
+Description: Validate messages based on header length.
+Input: Message with header.length field.
+Output:
+
+Processed (if valid).
+Rejected (if header.length ≠ actual body size ±5%).
+Acceptance Criteria:
+Logs Message ID + error details for rejections.
+
+3.1.4 US004 - Round-Robin Server Selection
+Description: External systems alternate between Node A & B.
+Input: List of available SimpleMQ servers (A, B).
+Output: Connection to next node in sequence (A→B→A→B).
+Acceptance Criteria:
+External systems implement client-side round-robin.
+
+3.1.5 US005 - Automatic Failover
+Description: Switch to backup node on failure.
+Input: Failed connection attempt.
+Output:
+
+Success (connected to backup node).
+Exception (if all retries fail).
+Acceptance Criteria:
+Retries within 5s, max 3 attempts.
+
+3.1.6 US006 - Configurable Dispatch Strategies (Future)
+Description: Support multiple dispatch strategies.
+Input: Configuration file (dispatch-strategy.properties).
+Output:
+
+Round-robin (default).
+Random, Priority-based (future).
+Acceptance Criteria:
+Strategy changeable without restart.
+3.1.7 US007 - JSON Storage
+Description: Store messages in dated JSON files.
+Input: Validated message.
+Output:
+
+File path: /data/messages/YYYYMMDD/HH/msgID.json.
+Acceptance Criteria:
+Files human-readable (Base64 for binary).
+
+3.1.8 US008 - Logging & Monitoring
+Description: Record key operations for debugging.
+Input: Message events (receive, forward, error).
+Output: Structured logs (JSON format).
+Acceptance Criteria:
+Logs include timestamp, Message ID, status.
+
+3.1.9 US009 - Automatic Data Cleanup
+Description: Delete messages older than 7 days.
+Input: Daily cleanup job.
+Output: Removal of expired files.
+Acceptance Criteria:
+Runs daily at 01:00 UTC.
+
+3.2 Non-Functional Requirements
+
+3.2.1 NF001 - High Throughput
+Target: 12 msg/sec sustained (~300K/week).
+Validation: Load test with 1M messages.
+
+3.2.2 NF002 - 7x24 Availability
+Uptime: ≥99.9% (excluding maintenance).
+Maintenance Window: ≤2hrs/month.
+
+3.2.3 NF003 - IP Whitelist Security
+Restriction: Only CONEGW IPs (e.g., 10.0.0.0/8).
+Rejection: Logs unauthorized attempts.
+
+3.2.4 NF004 - No Single Point of Failure
+Active-Active: Both nodes handle traffic.
+Validation: Kill one node → traffic shifts seamlessly.
+
+4. Traceability Matrix
+User Story	Section	Test Case
+US001	3.1.1	TC-101
+US002	3.1.2	TC-102
+...	...	...
+NF004	3.2.4	TC-413
+5. Appendix
+
+5.1 Sample Message Format
+
+json
+{
+  "header": {
+    "messageId": "UUIDv4",
+    "timestamp": "2023-11-21T14:30:00Z",
+    "length": 1024
+  },
+  "body": "SGVsbG8gd29ybGQh"  // Base64-encoded
+}
+5.2 Error Codes
+
+Code	Meaning
+200	Success
+400	Invalid message
+503	Service unavailable

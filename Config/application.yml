@@ -1,0 +1,41 @@
+# Server port
+server:
+  port: 8080
+
+  # Socket server port
+socket:
+  server:
+    port: 9091
+
+spring:
+  jvm:
+    opts: -Xms2g -Xmx4g -XX:+UseG1GC
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 10MB
+  task:
+    execution:
+      pool:
+        core-size: 10
+        max-size: 50
+        queue-capacity: 1000
+
+appConfig:
+  MessageLog:
+    path: C:\Users\ibm_richardshen\DBS\z_SubDDrive\
+  GrafanaLog:
+    path: C:\Users\ibm_richardshen\DBS\z_SubDDrive\
+
+routetable:
+  rule: round-robin
+  atmh:
+    key: "atmh"
+    socket: "atmh"
+  jetco:
+    key: "jetco"
+    socket: "jetco1,jetco2"
+  epsco:
+    key: "epsco"
+    socket: "epsco1,epsco2"
+
